@@ -1,7 +1,7 @@
 # run_tasks.py
 # Wykonuje DOWOLNĄ liczbę kroków z YAML (nowa struktura), zapisuje progres przyrostowo.
-# ZMIANA: dokument PDF jest dołączany JEDNORAZOWO na początku rozmowy, wraz z promptem "__INITIAL_USER_PROMPT__".
-# Kolejne kroki odwołują się do już wprowadzonej treści (bez ponownego wstrzykiwania dokumentu).
+# ZMIANA: dokument PDF jest dołączany TYLKO dla taska o id="__INITIAL_USER_PROMPT__"
+# ZMIANA: Historia to płaska lista messages - dokładnie to co idzie do LLM i wraca
 
 import os
 import json
@@ -22,7 +22,6 @@ def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 def make_proc_id() -> str:
-    # Krótki znacznik czasu do prefixu plików, np. 251108-221045
     return time.strftime("%y%m%d-%H%M%S")
 
 def ensure_dir_for(path: str):
@@ -36,12 +35,6 @@ def save_json(path: str, data: Any):
     ensure_dir_for(path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
-def load_json(path: str, default: Any):
-    if not os.path.exists(path):
-        return default
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 def read_text_from_path(path: str) -> str:
     ext = os.path.splitext(path)[1].lower()
@@ -73,10 +66,6 @@ def simple_render(template: str, ctx: Dict[str, Any]) -> str:
 
 def llm_call(model: str, temperature: float, messages: List[Dict[str, str]],
              seed: Optional[int]=None, max_output_tokens: Optional[int]=None) -> str:
-    """
-    Używa Chat Completions API (messages=...).
-    'seed' jest ignorowany (feature Responses API). max_output_tokens mapowany na max_tokens.
-    """
     kwargs = {
         "model": model,
         "temperature": temperature,
@@ -90,7 +79,6 @@ def llm_call(model: str, temperature: float, messages: List[Dict[str, str]],
     return text
 
 def save_result_with_prefix(base_prefix: str, proc_id: str, filename: str, content: str) -> str:
-    # zapisuje JSON pod ścieżką: "<base_prefix>/<proc_id>_<filename>"
     out_dir = base_prefix.rstrip("/\\")
     out_path = f"{out_dir}/{proc_id}_{filename}"
     ensure_dir_for(out_path)
@@ -110,10 +98,9 @@ def run_from_yaml(config_path: str = "config.yaml"):
 
     model = cfg.get("model", "gpt-4.1")
     temperature = float(cfg.get("temperature", 0.0))
-    seed = cfg.get("seed", None)  # ignorowane w chat.completions
+    seed = cfg.get("seed", None)
     max_output_tokens = cfg.get("max_output_tokens", None)
 
-    # Nowa struktura YAML
     prompts = cfg.get("prompts", {}) or {}
     system_prompt_ref = cfg.get("system_prompt_ref", None)
     system_prompt = prompts.get(system_prompt_ref, "").strip() if system_prompt_ref else ""
@@ -126,7 +113,6 @@ def run_from_yaml(config_path: str = "config.yaml"):
     if not tasks:
         raise RuntimeError("Brak sekcji 'tasks' w YAML.")
 
-    # proc_id i nagłówek logów - PRZENIEŚ TUTAJ
     proc_id = make_proc_id()
     conversation_path = f"{result_output_prefix.rstrip('/\\')}/{proc_id}_conversation.json"
     
@@ -149,21 +135,10 @@ def run_from_yaml(config_path: str = "config.yaml"):
         "inputs.source_pdf|basename": os.path.basename(source_pdf) if source_pdf else "",
     }
 
-    # Historia rozmowy – dopisywana przyrostowo
-    history_log: List[Dict[str, Any]] = load_json(conversation_path, default=[])
-
-    # Bieżące messages dla rozmowy z modelem
+    # Bieżące messages dla rozmowy z modelem - TO będzie zapisywane
     messages: List[Dict[str, str]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-
-    # === JEDNORAZOWE wstrzyknięcie: prompt analizujący PDF + treść dokumentu ===
-    initial_pdf_prompt = prompts.get("__INITIAL_USER_PROMPT__", "").strip()
-    if doc_text and initial_pdf_prompt:
-        initial_user = simple_render(initial_pdf_prompt, render_ctx)
-        initial_payload = f"{initial_user}\n\n=== DOKUMENT_START ===\n{doc_text}\n=== DOKUMENT_KONIEC ==="
-        messages.append({"role": "user", "content": initial_payload})
-        print("📎 Dołączono dokument do historii (jednorazowo).")
 
     previous_assistant_text: Optional[str] = None
 
@@ -203,8 +178,14 @@ def run_from_yaml(config_path: str = "config.yaml"):
         if task.get("append_previous_assistant", False) and previous_assistant_text:
             messages.append({"role": "assistant", "content": previous_assistant_text})
 
-        # UWAGA: NIE DOŁĄCZAMY już dokumentu – jest w historii od startu
-        messages.append({"role": role, "content": final_prompt})
+        # === SPECJALNY PRZYPADEK: wstrzyknięcie dokumentu TYLKO dla __INITIAL_USER_PROMPT__ ===
+        prompt_ref = task.get("prompt_ref", None)
+        if prompt_ref == "__INITIAL_USER_PROMPT__" and doc_text:
+            payload = f"{final_prompt}\n\n=== DOKUMENT_START ===\n{doc_text}\n=== DOKUMENT_KONIEC ==="
+            messages.append({"role": role, "content": payload})
+            print(f"📎 Dołączono dokument do taska {task_id} (prompt_ref: {prompt_ref})")
+        else:
+            messages.append({"role": role, "content": final_prompt})
 
         # Wywołanie LLM
         try:
@@ -222,23 +203,14 @@ def run_from_yaml(config_path: str = "config.yaml"):
         # Zapis wyniku (z prefixem procesu)
         out_path = save_result_with_prefix(result_output_prefix, proc_id, save_as, response_text)
 
-        # Zapis przyrostowy do historii
-        record = {
-            "timestamp": now_iso(),
-            "process_id": proc_id,
-            "task_index": idx,
-            "task_id": task_id,
-            "model": model,
-            "temperature": temperature,
-            "messages": messages,          # dokładnie to, co widzi LLM
-            "result_file": out_path
-        }
-        history_log.append(record)
-        save_json(conversation_path, history_log)
-
-        # Uaktualnij rozmowę i licznik
-        previous_assistant_text = response_text
+        # Dopisz odpowiedź assistanta do messages
         messages.append({"role": "assistant", "content": response_text})
+
+        # Zapisz aktualny stan rozmowy (płaska lista messages)
+        save_json(conversation_path, messages)
+
+        # Uaktualnij
+        previous_assistant_text = response_text
         done += 1
 
         # log – koniec kroku

@@ -68,11 +68,10 @@ prompts:
 
     Zasady techniczne:
     - Odpowiadasz WYŁĄCZNIE w formacie czystego JSON (bez bloków kodu, bez komentarzy, bez dodatkowego tekstu).
-    - Każda encja musi zawierać komplet pól: name, displayName, description, variants, conditions, evidence
+    - Każda encja musi zawierać komplet pól: name, displayName, description, conditions, evidence
         name         — unikatowa nazwa w camelCase (EN) (ASCII; litery/cyfry/underscore; bez PL znaków),
         displayName  — nazwa do wyświetlenia (naturalny język),
         description  — zwięzły opis do wyszukiwania semantycznego (co jest wyłączone, kiedy, wyjątki),
-        variants     — lista wariantów, w których wyłączenie OBOWIĄZUJE; jeśli nie dotyczy wariantów → [],
         evidence     — LISTA adresów w dokumencie (np. ["§12 ust. 3", "Art. 7 pkt 1 lit. a"]).
         conditions   — LISTA warunków
         
@@ -96,7 +95,7 @@ prompts:
     3) Dedup: nie powielaj istniejących encji (porównuj po sensie)
     4) Każda nowa encja MUSI mieć komplet pól i co najmniej jeden adres w evidence
 
-    Output: czysty JSON — tablica NOWYCH obiektów (name, displayName, description, variants, conditions, evidence).
+    Output: czysty JSON — tablica NOWYCH obiektów (name, displayName, description, conditions, evidence).
     Jeżeli brak nowych → zwróć [].
 
   EXCLUSION_VARIANT_RELATION_PROMPT: |
@@ -149,34 +148,34 @@ inputs:
 
 tasks:
   # PASS 0: Wprowadzenie dokumentu do kontekstu
-  - id: pass_0_exclusions
+  - id: __INITIAL_USER_PROMPT__ 
     role: user
     prompt_ref: __INITIAL_USER_PROMPT__
     render:
       pdf_basename: "{inputs.source_pdf|basename}"
-    save_as: pass_0_init.json
+    save_as: init.json
 
-  - id: pass_1_variants
-    role: user
-    prompt_ref: POLICY_VARIANT_EXTRACT_PROMPT
-    save_as: pass_1_variants.json
-
-  - id: pass_2_exclusions
+  - id: EXCLUSION_PROMPT
     role: user
     prompt_ref: EXCLUSION_PROMPT
-    save_as: pass_2_init.json
+    save_as: EXCLUSION_PROMPT.json
 
-  - id: pass_3_find_missing
+  - id: EXCLUSION_FIND_MISSING_PROMPT
     role: user
     prompt_ref: EXCLUSION_FIND_MISSING_PROMPT
-    save_as: pass_3_missing.json
+    save_as: EXCLUSION_FIND_MISSING_PROMPT.json
 
-  - id: pass_4_relations
+  - id: EXCLUSION_VARIANT_RELATION_PROMPT
     role: user
     prompt_ref: EXCLUSION_VARIANT_RELATION_PROMPT
-    save_as: pass_4_exclusions_with_variants.json
+    save_as: EXCLUSION_VARIANT_RELATION_PROMPT.json
 
-  - id: pass_5_normalise
+  - id: NORMALISE_PROMPT
     role: user
     prompt_ref: NORMALISE_PROMPT
-    save_as: pass_5_final.json
+    save_as: NORMALISE_PROMPT.json
+  
+  - id: POLICY_VARIANT_EXTRACT_PROMPT
+    role: user
+    prompt_ref: POLICY_VARIANT_EXTRACT_PROMPT
+    save_as: POLICY_VARIANT_EXTRACT_PROMPT.json
