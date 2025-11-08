@@ -1,0 +1,182 @@
+model: gpt-4.1
+temperature: 0.0
+
+output_json_file: conversation_history.json
+result_output_prefix: output/ner_results
+system_prompt_ref: SYSTEM_PROMPT
+
+prompts:
+  SYSTEM_PROMPT: |
+    Jesteś systemem Named Entity Recognition (NER) pracującym na dokumentach Ogólnych Warunków Ubezpieczenia (OWU).
+    
+    Zasady merytoryczne:
+    - Korzystasz WYŁĄCZNIE z treści analizowanego dokumentu. Zero wiedzy spoza dokumentu.
+    - Nie agreguj pojęć o odmiennych warunkach — to osobne encje.
+    - Jeżeli fragment jest warunkowy („chyba że…", „z wyjątkiem…") — uwzględnij w opisie.
+
+    Zasady techniczne:
+    - Odpowiadasz WYŁĄCZNIE czystym JSON (bez bloków kodu, komentarzy, tekstu).
+    - Adresy dowodowe (evidence) muszą odpowiadać realnym oznaczeniom w dokumencie.
+    - Jeżeli nie potrafisz wskazać adresu → NIE twórz encji.
+    - Duplikaty: zachowaj redundancję
+
+  __INITIAL_USER_PROMPT__: |
+    Dołączam plik dokumentu "{pdf_basename}".
+    Przeczytaj go i czekaj na wytyczne.
+    Czekaj.
+  
+  POLICY_VARIANT_EXTRACT_PROMPT: |
+    Masz w historii pełny tekst dokumentu.
+    Zadanie: wyekstrahuj warianty/plany ubezpieczenia (klasa POLICY_VARIANT).
+    
+    Każda encja POLICY_VARIANT musi zawierać:
+      name           — unikatowa nazwa w camelCase (EN, ASCII),
+      displayName    — nazwa do wyświetlenia (PL),
+      description    — opis wariantu (PL),
+      evidence       — lista adresów w dokumencie,
+    
+    Wykrywanie przez kontrast semantyczny:
+    - Jeśli dokument mówi "Wariant Premium obejmuje kradzież", a Basic/Comfort nie wspomina → wnioskuj, że Basic/Comfort kradzieży nie mają
+    - Jeśli jest tabela porównawcza z checkmarkami (✓/✗) → wykorzystaj to
+    
+    Przykład:
+    {
+      "name": "basicVariant",
+      "displayName": "Wariant Basic",
+      "description": "Podstawowy zakres ochrony obejmujący pożar i zalanie",
+      "evidence": ["§3 ust. 1", "Tabela porównawcza str. 5"],
+    }
+    
+    Output: czysty JSON — tablica obiektów POLICY_VARIANT.
+    Jeżeli dokument nie definiuje wariantów → zwróć [].
+  
+  EXCLUSION_PROMPT: |
+    Masz w historii pełny tekst dokumentu
+  
+    Zadanie: wyekstrahuj WSZYSTKIE encje klasy EXCLUSION (wyłączenia odpowiedzialności/świadczenia).
+    - Szukasz wyłączeń wprost wymienionych lub wynikających ze sformułowań: „nie obejmuje", „nie ponosi odpowiedzialności", „wyłączone są", itp.
+
+    Zasady merytoryczne:
+    - Korzystasz WYŁĄCZNIE z treści analizowanego dokumentu. Zero wiedzy spoza dokumentu.
+    - Szukasz wyłączeń:
+        (a) wprost wymienionych w rozdziale/sekcji wyłączeń,
+        (b) rozproszonych w innych częściach (definicje, obowiązki, warunki wypłaty, ograniczenia, postanowienia końcowe),
+        (c) wynikających pośrednio ze sformułowań typu: „nie obejmuje”, „nie ponosi odpowiedzialności”, „nie wypłaca świadczenia”, „wyłączone są”, itp.
+        (d) zależnych od wariantów ubezpieczenia — TYLKO jeśli warianty i ograniczenia są jednoznacznie wskazane.
+    - Nie agreguj pojęć o odmiennych warunkach (np. „prace budowlane” vs „naprawy instalacji” przy różnych zastrzeżeniach) — to osobne encje.
+    - (conditions) Jeżeli fragment jest warunkowy („chyba że…”, „z wyjątkiem…”) - uwzględnij to w opisie encji.
+
+    Zasady techniczne:
+    - Odpowiadasz WYŁĄCZNIE w formacie czystego JSON (bez bloków kodu, bez komentarzy, bez dodatkowego tekstu).
+    - Każda encja musi zawierać komplet pól: name, displayName, description, variants, conditions, evidence
+        name         — unikatowa nazwa w camelCase (EN) (ASCII; litery/cyfry/underscore; bez PL znaków),
+        displayName  — nazwa do wyświetlenia (naturalny język),
+        description  — zwięzły opis do wyszukiwania semantycznego (co jest wyłączone, kiedy, wyjątki),
+        variants     — lista wariantów, w których wyłączenie OBOWIĄZUJE; jeśli nie dotyczy wariantów → [],
+        evidence     — LISTA adresów w dokumencie (np. ["§12 ust. 3", "Art. 7 pkt 1 lit. a"]).
+        conditions   — LISTA warunków
+        
+    - Adresy muszą odpowiadać realnym oznaczeniom w dokumencie (Art./§/ust./pkt/lit.). Jeśli dokument używa numeracji punktów bez „Art.”/„§”, odwzoruj to wiernie (np. "Rozdz. IV pkt 3").
+    - Jeżeli nie potrafisz wskazać żadnego poprawnego adresu dowodu → NIE twórz encji.
+    - Duplikaty:
+        - Dwa wpisy o tym samym zakresie znaczeniowym i identycznych warunkach traktuj jako jedną encję z połączonym evidence.
+        - Jeśli warunki różnią się istotnie (inne ograniczenia/wyjątki/progi) - tworzysz odrębną encję.
+
+    Output:
+    - TABLICA obiektów JSON spełniających powyższy schemat. Bez pól dodatkowych.
+
+
+  EXCLUSION_FIND_MISSING_PROMPT: |
+    Masz w historii pełny tekst dokumentu OWU oraz listę wcześniej wykrytych encji EXCLUSION.
+    Zadanie: ponowna analiza w celu znalezienia WSZYSTKICH brakujących encji EXCLUSION.
+
+    Metody:
+    1) Przejrzyj fragmenty z sygnałami wyłączeń („nie obejmuje", „wyłączone są", itp.)
+    2) Przeskanuj sekcje inne niż „Wyłączenia" (definicje, obowiązki, warunki, postanowienia końcowe)
+    3) Dedup: nie powielaj istniejących encji (porównuj po sensie)
+    4) Każda nowa encja MUSI mieć komplet pól i co najmniej jeden adres w evidence
+
+    Output: czysty JSON — tablica NOWYCH obiektów (name, displayName, description, variants, conditions, evidence).
+    Jeżeli brak nowych → zwróć [].
+
+  EXCLUSION_VARIANT_RELATION_PROMPT: |
+    Masz w historii:
+    - Pełny tekst dokumentu OWU
+    - Listę encji EXCLUSION
+    - Listę encji POLICY_VARIANT
+    
+    Zadanie: do każdej encji EXCLUSION dodaj pole "applicableVariants" wskazujące, w których wariantach to wyłączenie OBOWIĄZUJE.
+    
+    Reguły:
+    - Analizuj tekst dokumentu i encje POLICY_VARIANT
+    - Jeśli wyłączenie dotyczy WSZYSTKICH wariantów → applicableVariants: [] (pusta lista oznacza "wszystkie")
+    - Jeśli wyłączenie dotyczy tylko niektórych wariantów → wymień je explicite: applicableVariants: ["Basic", "Comfort"]
+    - Jeśli z POLICY_VARIANT wiadomo, że dany wariant ma "exclusions: [kradzież]", a encja EXCLUSION dotyczy kradzieży → to wyłączenie obowiązuje w tym wariancie
+    
+    Output: czysty JSON — tablica WSZYSTKICH encji EXCLUSION z DODANYM polem applicableVariants.
+    Struktura encji:
+    {
+      "name": "...",
+      "displayName": "...",
+      "description": "...",
+      "evidence": [...],
+      "conditions": [...],
+      "applicableVariants": []  // ← nowe pole
+    }
+
+  NORMALISE_PROMPT: |
+    Dokument był analizowany w kilku krokach. Teraz normalizacja końcowa.
+    
+    Wejście: lista encji EXCLUSION z poprzedniego kroku.
+    Zadanie: zwróć tę SAMĄ liczbę encji po normalizacji pól — bez usuwania, łączenia ani dodawania.
+
+    Reguły normalizacji:
+      - name: camelCase (ASCII, bez spacji i znaków specjalnych), unikalność (sufiks numeryczny przy kolizji)
+      - displayName: popraw gramatykę/ortografię, kapitalizację; nie zmieniaj znaczenia
+      - description: usuń błędy językowe, rozwiń skróty, doprecyzuj warunki/wyjątki
+      - conditions: tablica stringów, usuń duplikaty
+      - applicableVariants: tablica stringów, usuń duplikaty, zachowaj oryginalne nazwy wariantów
+      - evidence: lista UNIKALNYCH adresów, normalizuj format (np. "§12 ust. 3"), nie twórz nowych adresów
+
+    Zakazy:
+      - Nie dodawaj nowych pól
+      - Nie zmieniaj kolejności encji
+
+    Output: czysty JSON — tablica obiektów z polami {name, displayName, description, conditions, evidence, applicableVariants}.
+
+inputs:
+  source_pdf: ./data/owu.pdf
+
+tasks:
+  # PASS 0: Wprowadzenie dokumentu do kontekstu
+  - id: pass_0_exclusions
+    role: user
+    prompt_ref: __INITIAL_USER_PROMPT__
+    render:
+      pdf_basename: "{inputs.source_pdf|basename}"
+    save_as: pass_0_init.json
+
+  - id: pass_1_variants
+    role: user
+    prompt_ref: POLICY_VARIANT_EXTRACT_PROMPT
+    save_as: pass_1_variants.json
+
+  - id: pass_2_exclusions
+    role: user
+    prompt_ref: EXCLUSION_PROMPT
+    save_as: pass_2_init.json
+
+  - id: pass_3_find_missing
+    role: user
+    prompt_ref: EXCLUSION_FIND_MISSING_PROMPT
+    save_as: pass_3_missing.json
+
+  - id: pass_4_relations
+    role: user
+    prompt_ref: EXCLUSION_VARIANT_RELATION_PROMPT
+    save_as: pass_4_exclusions_with_variants.json
+
+  - id: pass_5_normalise
+    role: user
+    prompt_ref: NORMALISE_PROMPT
+    save_as: pass_5_final.json
