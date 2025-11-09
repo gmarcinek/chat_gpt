@@ -1,7 +1,4 @@
-# run_tasks.py
-# Wykonuje DOWOLNĄ liczbę kroków z YAML (nowa struktura), zapisuje progres przyrostowo.
-# ZMIANA: dokument PDF jest dołączany TYLKO dla taska o id="__INITIAL_USER_PROMPT__"
-# ZMIANA: Historia to płaska lista messages - dokładnie to co idzie do LLM i wraca
+# run_tasks.py (fragmenty z istotnymi zmianami)
 
 import os
 import json
@@ -13,70 +10,48 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-# ====== OpenAI (Chat Completions API) ======
-from openai import OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"))
+# === NOWE: zunifikowany klient LLM ===
+from llm_client import LLMClient
+# run_tasks.py
+# ... (nagłówek bez zmian)
 
-# ================= Pomocnicze =================
-def now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
+import os
+import json
+import time
+import yaml
+import pathlib
+from typing import List, Dict, Any, Optional
 
-def make_proc_id() -> str:
-    return time.strftime("%y%m%d-%H%M%S")
+from dotenv import load_dotenv
+load_dotenv()
 
-def ensure_dir_for(path: str):
-    pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+# === zunifikowany klient LLM ===
+from llm_client import LLMClient
 
-def load_yaml(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+# === utils (NOWE) ===
+from utils import (
+    now_iso,
+    make_proc_id,
+    ensure_dir_for,
+    load_yaml,
+    save_json,
+    read_text_from_path,
+    simple_render,
+    save_result_with_prefix,
+)
 
-def save_json(path: str, data: Any):
-    ensure_dir_for(path)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def read_text_from_path(path: str) -> str:
-    ext = os.path.splitext(path)[1].lower()
-    if ext in [".txt", ".md", ".json"]:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    if ext == ".pdf":
-        try:
-            import PyPDF2
-        except ImportError:
-            raise RuntimeError("Brak PyPDF2. Zainstaluj: pip install PyPDF2")
-        parts = []
-        with open(path, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            for i, page in enumerate(reader.pages):
-                try:
-                    page_text = page.extract_text() or ""
-                except Exception:
-                    page_text = ""
-                parts.append(f"\n\n[[PAGE {i+1}]]\n{page_text}")
-        return "".join(parts).strip()
-    raise RuntimeError(f"Nieobsługiwane rozszerzenie: {ext}")
-
-def simple_render(template: str, ctx: Dict[str, Any]) -> str:
-    out = template
-    for k, v in ctx.items():
-        out = out.replace("{" + k + "}", str(v))
-    return out
+# === NOWE: globalny klient
+_llm = LLMClient()
 
 def llm_call(model: str, temperature: float, messages: List[Dict[str, str]],
              seed: Optional[int]=None, max_output_tokens: Optional[int]=None) -> str:
-    kwargs = {
-        "model": model,
-        "temperature": temperature,
-        "messages": messages,
-    }
-    if max_output_tokens is not None:
-        kwargs["max_tokens"] = max_output_tokens
-
-    resp = client.chat.completions.create(**kwargs)
-    text = (resp.choices[0].message.content or "").strip()
-    return text
+    return _llm.chat(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        seed=seed,
+    )
 
 def save_result_with_prefix(base_prefix: str, proc_id: str, filename: str, content: str) -> str:
     out_dir = base_prefix.rstrip("/\\")
@@ -151,7 +126,6 @@ def run_from_yaml(config_path: str = "config.yaml"):
         save_as = task.get("save_as", f"{task_id}.json")
         prompt_text = task.get("prompt", None)
 
-        # prompt_ref → prompts[ref]
         if prompt_text is None:
             ref = task.get("prompt_ref", None)
             if ref:
@@ -178,7 +152,7 @@ def run_from_yaml(config_path: str = "config.yaml"):
         if task.get("append_previous_assistant", False) and previous_assistant_text:
             messages.append({"role": "assistant", "content": previous_assistant_text})
 
-        # === SPECJALNY PRZYPADEK: wstrzyknięcie dokumentu TYLKO dla __INITIAL_USER_PROMPT__ ===
+        # SPECJALNIE: wstrzyknięcie dokumentu TYLKO dla __INITIAL_USER_PROMPT__
         prompt_ref = task.get("prompt_ref", None)
         if prompt_ref == "__INITIAL_USER_PROMPT__" and doc_text:
             payload = f"{final_prompt}\n\n=== DOKUMENT_START ===\n{doc_text}\n=== DOKUMENT_KONIEC ==="
@@ -187,7 +161,7 @@ def run_from_yaml(config_path: str = "config.yaml"):
         else:
             messages.append({"role": role, "content": final_prompt})
 
-        # Wywołanie LLM
+        # Wywołanie LLM przez zunifikowany klient
         try:
             response_text = llm_call(
                 model=model,
@@ -220,7 +194,6 @@ def run_from_yaml(config_path: str = "config.yaml"):
     print(f"🎉 Zakończono proces {proc_id} — łączna liczba kroków: {total}")
     print(f"🗂️ Historia konwersacji: {conversation_path}")
 
-# ================= Uruchomienie =================
 if __name__ == "__main__":
     import sys
     cfg_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"

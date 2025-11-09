@@ -25,31 +25,6 @@ prompts:
     Przeczytaj go i czekaj na wytyczne.
     Czekaj.
   
-  POLICY_VARIANT_EXTRACT_PROMPT: |
-    Masz w historii pełny tekst dokumentu.
-    Zadanie: wyekstrahuj warianty/plany ubezpieczenia (klasa POLICY_VARIANT).
-    
-    Każda encja POLICY_VARIANT musi zawierać:
-      name           — unikatowa nazwa w camelCase (EN, ASCII),
-      displayName    — nazwa do wyświetlenia (PL),
-      description    — opis wariantu (PL),
-      evidence       — lista adresów w dokumencie,
-    
-    Wykrywanie przez kontrast semantyczny:
-    - Jeśli dokument mówi "Wariant Premium obejmuje kradzież", a Basic/Comfort nie wspomina → wnioskuj, że Basic/Comfort kradzieży nie mają
-    - Jeśli jest tabela porównawcza z checkmarkami (✓/✗) → wykorzystaj to
-    
-    Przykład:
-    {
-      "name": "basicVariant",
-      "displayName": "Wariant Basic",
-      "description": "Podstawowy zakres ochrony obejmujący pożar i zalanie",
-      "evidence": ["§3 ust. 1", "Tabela porównawcza str. 5"],
-    }
-    
-    Output: czysty JSON — tablica obiektów POLICY_VARIANT.
-    Jeżeli dokument nie definiuje wariantów → zwróć [].
-  
   EXCLUSION_PROMPT: |
     Masz w historii pełny tekst dokumentu
   
@@ -98,30 +73,30 @@ prompts:
     Output: czysty JSON — tablica NOWYCH obiektów (name, displayName, description, conditions, evidence).
     Jeżeli brak nowych → zwróć [].
 
-  EXCLUSION_VARIANT_RELATION_PROMPT: |
-    Masz w historii:
-    - Pełny tekst dokumentu OWU
-    - Listę encji EXCLUSION
-    - Listę encji POLICY_VARIANT
+  POLICY_VARIANT_EXTRACT_PROMPT: |
+    Masz w historii pełny tekst dokumentu i wyniki ekstrakcji wyłączeń z polisy.
+    Zadanie: wyekstrahuj warianty/plany ubezpieczenia (klasa POLICY_VARIANT)
+
+    Każda encja POLICY_VARIANT musi zawierać:
+      name           — unikatowa nazwa w camelCase (EN, ASCII),
+      displayName    — nazwa do wyświetlenia (PL),
+      description    — opis wariantu (PL),
+      evidence       — lista adresów w dokumencie,
     
-    Zadanie: do każdej encji EXCLUSION dodaj pole "applicableVariants" wskazujące, w których wariantach to wyłączenie OBOWIĄZUJE.
+    Wykrywanie przez kontrast semantyczny:
+    - Jeśli dokument mówi "Wariant Premium obejmuje kradzież", a Basic/Comfort nie wspomina → wnioskuj, że Basic/Comfort kradzieży nie mają
+    - Jeśli jest tabela porównawcza z checkmarkami (✓/✗) → wykorzystaj to
     
-    Reguły:
-    - Analizuj tekst dokumentu i encje POLICY_VARIANT
-    - Jeśli wyłączenie dotyczy WSZYSTKICH wariantów → applicableVariants: [] (pusta lista oznacza "wszystkie")
-    - Jeśli wyłączenie dotyczy tylko niektórych wariantów → wymień je explicite: applicableVariants: ["Basic", "Comfort"]
-    - Jeśli z POLICY_VARIANT wiadomo, że dany wariant ma "exclusions: [kradzież]", a encja EXCLUSION dotyczy kradzieży → to wyłączenie obowiązuje w tym wariancie
-    
-    Output: czysty JSON — tablica WSZYSTKICH encji EXCLUSION z DODANYM polem applicableVariants.
-    Struktura encji:
+    Przykład:
     {
-      "name": "...",
-      "displayName": "...",
-      "description": "...",
-      "evidence": [...],
-      "conditions": [...],
-      "applicableVariants": []  // ← nowe pole
+      "name": "basicVariant",
+      "displayName": "Wariant Basic",
+      "description": "Podstawowy zakres ochrony obejmujący pożar i zalanie",
+      "evidence": ["§3 ust. 1", "Tabela porównawcza str. 5"],
     }
+    
+    Output: czysty JSON — tablica obiektów POLICY_VARIANT.
+    Jeżeli dokument nie definiuje wariantów → zwróć [].
 
   NORMALISE_PROMPT: |
     Dokument był analizowany w kilku krokach. Teraz normalizacja końcowa.
@@ -134,7 +109,7 @@ prompts:
       - displayName: popraw gramatykę/ortografię, kapitalizację; nie zmieniaj znaczenia
       - description: usuń błędy językowe, rozwiń skróty, doprecyzuj warunki/wyjątki
       - conditions: tablica stringów, usuń duplikaty
-      - applicableVariants: tablica stringów, usuń duplikaty, zachowaj oryginalne nazwy wariantów
+      - applicableVariants: powiąż z wariantami ubezpieczenia - tablica stringów, usuń duplikaty, zachowaj oryginalne nazwy wariantów
       - evidence: lista UNIKALNYCH adresów, normalizuj format (np. "§12 ust. 3"), nie twórz nowych adresów
 
     Zakazy:
@@ -148,34 +123,30 @@ inputs:
 
 tasks:
   # PASS 0: Wprowadzenie dokumentu do kontekstu
-  - id: __INITIAL_USER_PROMPT__ 
+  - id: Wrpowadzenie dokumentu do kontekstu 
     role: user
     prompt_ref: __INITIAL_USER_PROMPT__
     render:
       pdf_basename: "{inputs.source_pdf|basename}"
-    save_as: init.json
+    save_as: 0.init.json
 
-  - id: EXCLUSION_PROMPT
+  - id: Ekstrakcja encji typy EXCLUSION
     role: user
     prompt_ref: EXCLUSION_PROMPT
-    save_as: EXCLUSION_PROMPT.json
+    save_as: 1.ekstrakcja.json
 
-  - id: EXCLUSION_FIND_MISSING_PROMPT
+  - id: Ekstrakcja encji typy EXCLUSION dodatkowy run
     role: user
     prompt_ref: EXCLUSION_FIND_MISSING_PROMPT
-    save_as: EXCLUSION_FIND_MISSING_PROMPT.json
-
-  - id: EXCLUSION_VARIANT_RELATION_PROMPT
-    role: user
-    prompt_ref: EXCLUSION_VARIANT_RELATION_PROMPT
-    save_as: EXCLUSION_VARIANT_RELATION_PROMPT.json
-
-  - id: NORMALISE_PROMPT
-    role: user
-    prompt_ref: NORMALISE_PROMPT
-    save_as: NORMALISE_PROMPT.json
+    save_as: 2.ekstrakcja.json
   
   - id: POLICY_VARIANT_EXTRACT_PROMPT
     role: user
     prompt_ref: POLICY_VARIANT_EXTRACT_PROMPT
-    save_as: POLICY_VARIANT_EXTRACT_PROMPT.json
+    save_as: 3.warianty.json
+
+  - id: NORMALISE_PROMPT
+    role: user
+    prompt_ref: NORMALISE_PROMPT
+    save_as: 4.normalizacja.json
+  

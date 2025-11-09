@@ -1,0 +1,137 @@
+# models.yaml
+# Definicje modeli, providerów i ich parametrów technicznych.
+
+providers:
+  openai: "OpenAI"
+  anthropic: "Anthropic"
+  ollama: "Ollama"
+
+models:
+  # === OpenAI GPT-5 family ===
+  gpt-5:
+    provider: openai
+    input_context: 272000
+    max_output: 128000
+    vision: true
+  gpt-5-mini:
+    provider: openai
+    input_context: 272000
+    max_output: 128000
+    vision: true
+  gpt-5-nano:
+    provider: openai
+    input_context: 272000
+    max_output: 128000
+    vision: true
+
+  # === OpenAI GPT-4.1 family ===
+  gpt-4.1:
+    provider: openai
+    input_context: 1047576
+    max_output: 32768
+    vision: true
+  gpt-4.1-mini:
+    provider: openai
+    input_context: 1047576
+    max_output: 32768
+    vision: true
+  gpt-4.1-nano:
+    provider: openai
+    input_context: 1047576
+    max_output: 32768
+    vision: true
+
+  # === OpenAI GPT-4o (legacy) ===
+  gpt-4o:
+    provider: openai
+    input_context: 128000
+    max_output: 16384
+    vision: true
+  gpt-4o-mini:
+    provider: openai
+    input_context: 128000
+    max_output: 16384
+    vision: true
+
+  # === Anthropic Claude family ===
+  claude-opus-4.1:
+    provider: anthropic
+    input_context: 200000
+    max_output: 32000
+    vision: true
+  claude-opus-4:
+    provider: anthropic
+    input_context: 200000
+    max_output: 32000
+    vision: true
+  claude-sonnet-4:
+    provider: anthropic
+    input_context: 200000
+    max_output: 64000
+    vision: true
+  claude-3.7-sonnet:
+    provider: anthropic
+    input_context: 200000
+    max_output: 64000
+    vision: true
+  claude-3.5-sonnet:
+    provider: anthropic
+    input_context: 200000
+    max_output: 8192
+    vision: true
+  claude-3.5-haiku:
+    provider: anthropic
+    input_context: 200000
+    max_output: 8192
+    vision: true
+  claude-3-haiku:
+    provider: anthropic
+    input_context: 200000
+    max_output: 4096
+    vision: true
+
+  # === Ollama – coding ===
+  qwen2.5-coder:
+    provider: ollama
+    input_context: 128000
+    max_output: 4096
+    vision: false
+  qwen2.5-coder:32b:
+    provider: ollama
+    input_context: 128000
+    max_output: 4096
+    vision: false
+  codestral:
+    provider: ollama
+    input_context: 256000
+    max_output: 4096
+    vision: false
+
+  # === Ollama – vision ===
+  llama3.2-vision:11b:
+    provider: ollama
+    input_context: 128000
+    max_output: 2048
+    vision: true
+  llama3.2-vision:90b:
+    provider: ollama
+    input_context: 128000
+    max_output: 2048
+    vision: true
+  qwen2.5vl:7b:
+    provider: ollama
+    input_context: 128000
+    max_output: 4096
+    vision: true
+  gemma3:12b:
+    provider: ollama
+    input_context: 128000
+    max_output: 8192
+    vision: true
+
+defaults:
+  # Domyślne limity, gdy model nie jest zdefiniowany
+  input_context: 32768
+  max_output: 8192
+  provider: openai
+  vision: false
