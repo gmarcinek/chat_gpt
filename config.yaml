@@ -1,3 +1,6 @@
+inputs:
+  source_pdf: ./data/owu2.pdf
+
 model: gpt-4.1
 temperature: 0.0
 
@@ -62,7 +65,8 @@ prompts:
 
   EXCLUSION_FIND_MISSING_PROMPT: |
     Masz w historii pełny tekst dokumentu OWU oraz listę wcześniej wykrytych encji EXCLUSION.
-    Zadanie: ponowna analiza w celu znalezienia WSZYSTKICH brakujących encji EXCLUSION.
+    Zadanie: wyekstraktuj encje EXCLUSION które wynikają pośrednio ale logicznie z treści dokumentu.
+    Ponowna analiza w celu znalezienia wszystkich BRAKUJĄCYCH encji EXCLUSION.
 
     Metody:
     1) Przejrzyj fragmenty z sygnałami wyłączeń („nie obejmuje", „wyłączone są", itp.)
@@ -117,9 +121,6 @@ prompts:
       - Nie zmieniaj kolejności encji
 
     Output: czysty JSON — tablica obiektów z polami {name, displayName, description, conditions, evidence, applicableVariants}.
-
-inputs:
-  source_pdf: ./data/owu.pdf
 
 tasks:
   # PASS 0: Wprowadzenie dokumentu do kontekstu

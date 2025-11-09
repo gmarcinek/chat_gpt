@@ -43,11 +43,15 @@ from utils import (
 # === NOWE: globalny klient
 _llm = LLMClient()
 
-def llm_call(model: str, temperature: float, messages: List[Dict[str, str]],
-             seed: Optional[int]=None, max_output_tokens: Optional[int]=None) -> str:
+def llm_call(messages: List[Dict[str, str]],
+             model: Optional[str]=None,
+             temperature: Optional[float]=None,
+             seed: Optional[int]=None,
+             max_output_tokens: Optional[int]=None) -> str:
+    # Delegacja ustawień modelu do klienta (domyślne z models.yaml)
     return _llm.chat(
-        model=model,
         messages=messages,
+        model=model,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         seed=seed,
@@ -71,10 +75,11 @@ def run_from_yaml(config_path: str = "config.yaml"):
 
     cfg = load_yaml(config_path)
 
-    model = cfg.get("model", "gpt-4.1")
-    temperature = float(cfg.get("temperature", 0.0))
-    seed = cfg.get("seed", None)
-    max_output_tokens = cfg.get("max_output_tokens", None)
+    # Parametry modelu są zarządzane w llm_client/models.yaml – main nie ingeruje
+    model = cfg.get("model", None)
+    temperature = None
+    seed = None
+    max_output_tokens = None
 
     prompts = cfg.get("prompts", {}) or {}
     system_prompt_ref = cfg.get("system_prompt_ref", None)
@@ -164,11 +169,8 @@ def run_from_yaml(config_path: str = "config.yaml"):
         # Wywołanie LLM przez zunifikowany klient
         try:
             response_text = llm_call(
-                model=model,
-                temperature=temperature,
                 messages=messages,
-                seed=seed,
-                max_output_tokens=max_output_tokens
+                model=model,
             )
         except Exception as e:
             response_text = json.dumps({"error": str(e)}, ensure_ascii=False)

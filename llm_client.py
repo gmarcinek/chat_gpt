@@ -233,3 +233,36 @@ class LLMClient:
             max_output_tokens=max_output_tokens,
             seed=seed,
         )
+
+
+    # Nowa, domyślna wersja interfejsu z opcjonalnymi parametrami
+    def chat_v2(
+        self,
+        messages: List[Message],
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_output_tokens: Optional[int] = None,
+        seed: Optional[int] = None,
+    ) -> str:
+        # Wybór modelu z models.yaml, jeśli nie podano
+        effective_model = models.resolve_model(model or "")
+        provider = self._get_provider(effective_model)
+        client = self._ensure_client(provider)
+
+        # Domyślne wartości wykonania
+        effective_temperature = 0.0 if temperature is None else float(temperature)
+        if max_output_tokens is None:
+            effective_max_output = models.get_model_output_limit(effective_model)
+        else:
+            effective_max_output = int(max_output_tokens)
+
+        return client.chat(
+            model=effective_model,
+            messages=messages,
+            temperature=effective_temperature,
+            max_output_tokens=effective_max_output,
+            seed=seed,
+        )
+
+    # Nadpisz starszą sygnaturę nową wersją
+    chat = chat_v2
