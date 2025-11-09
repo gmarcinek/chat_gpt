@@ -1,25 +1,10 @@
-# run_tasks.py (fragmenty z istotnymi zmianami)
-
-import os
-import json
-import time
-import yaml
-import pathlib
-from typing import List, Dict, Any, Optional
-
-from dotenv import load_dotenv
-load_dotenv()
-
-# === NOWE: zunifikowany klient LLM ===
-from llm_client import LLMClient
 # run_tasks.py
-# ... (nagłówek bez zmian)
-
 import os
 import json
 import time
 import yaml
 import pathlib
+import argparse
 from typing import List, Dict, Any, Optional
 
 from dotenv import load_dotenv
@@ -28,7 +13,7 @@ load_dotenv()
 # === zunifikowany klient LLM ===
 from llm_client import LLMClient
 
-# === utils (NOWE) ===
+# === utils ===
 from utils import (
     now_iso,
     make_proc_id,
@@ -48,7 +33,6 @@ def llm_call(messages: List[Dict[str, str]],
              temperature: Optional[float]=None,
              seed: Optional[int]=None,
              max_output_tokens: Optional[int]=None) -> str:
-    # Delegacja ustawień modelu do klienta (domyślne z models.yaml)
     return _llm.chat(
         messages=messages,
         model=model,
@@ -71,11 +55,10 @@ def save_result_with_prefix(base_prefix: str, proc_id: str, filename: str, conte
 # ================= Główna funkcja =================
 def run_from_yaml(config_path: str = "config.yaml"):
     if not os.path.exists(config_path):
-        raise FileNotFoundError("Brak config.yaml")
+        raise FileNotFoundError(f"Brak pliku konfiguracji: {config_path}")
 
     cfg = load_yaml(config_path)
 
-    # Parametry modelu są zarządzane w llm_client/models.yaml – main nie ingeruje
     model = cfg.get("model", None)
     temperature = None
     seed = None
@@ -98,6 +81,7 @@ def run_from_yaml(config_path: str = "config.yaml"):
     
     step_ids = [t.get("id", f"task_{i+1}") for i, t in enumerate(tasks)]
     print(f"🚀 Start procesu {proc_id}")
+    print(f"📄 Config: {config_path}")
     print(f"🧩 Kroków: {len(tasks)} → {', '.join(step_ids)}")
     print(f"🧠 Model: {model} · 🌡️ T={temperature}\n")
 
@@ -115,7 +99,7 @@ def run_from_yaml(config_path: str = "config.yaml"):
         "inputs.source_pdf|basename": os.path.basename(source_pdf) if source_pdf else "",
     }
 
-    # Bieżące messages dla rozmowy z modelem - TO będzie zapisywane
+    # Bieżące messages dla rozmowy z modelem
     messages: List[Dict[str, str]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -140,7 +124,7 @@ def run_from_yaml(config_path: str = "config.yaml"):
             else:
                 raise RuntimeError(f"Task '{task_id}' nie ma 'prompt' ani 'prompt_ref'.")
 
-        # render (prosta templatyzacja wartości)
+        # render
         if "render" in task:
             for k, v in (task["render"] or {}).items():
                 if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
@@ -150,14 +134,12 @@ def run_from_yaml(config_path: str = "config.yaml"):
                     render_ctx[k] = v
         final_prompt = simple_render(prompt_text, render_ctx)
 
-        # log – start kroku
         print(f"▶️  [{idx}/{total}] {task_id} — uruchamianie…")
 
-        # opcja: dołącz poprzednią odpowiedź jako assistant
         if task.get("append_previous_assistant", False) and previous_assistant_text:
             messages.append({"role": "assistant", "content": previous_assistant_text})
 
-        # SPECJALNIE: wstrzyknięcie dokumentu TYLKO dla __INITIAL_USER_PROMPT__
+        # wstrzyknięcie dokumentu dla __INITIAL_USER_PROMPT__
         prompt_ref = task.get("prompt_ref", None)
         if prompt_ref == "__INITIAL_USER_PROMPT__" and doc_text:
             payload = f"{final_prompt}\n\n=== DOKUMENT_START ===\n{doc_text}\n=== DOKUMENT_KONIEC ==="
@@ -166,7 +148,7 @@ def run_from_yaml(config_path: str = "config.yaml"):
         else:
             messages.append({"role": role, "content": final_prompt})
 
-        # Wywołanie LLM przez zunifikowany klient
+        # Wywołanie LLM
         try:
             response_text = llm_call(
                 messages=messages,
@@ -176,20 +158,18 @@ def run_from_yaml(config_path: str = "config.yaml"):
             response_text = json.dumps({"error": str(e)}, ensure_ascii=False)
             print(f"❌  [{idx}/{total}] {task_id} — błąd: {e}")
 
-        # Zapis wyniku (z prefixem procesu)
+        # Zapis wyniku
         out_path = save_result_with_prefix(result_output_prefix, proc_id, save_as, response_text)
 
-        # Dopisz odpowiedź assistanta do messages
+        # Dopisz odpowiedź assistanta
         messages.append({"role": "assistant", "content": response_text})
 
-        # Zapisz aktualny stan rozmowy (płaska lista messages)
+        # Zapisz stan rozmowy
         save_json(conversation_path, messages)
 
-        # Uaktualnij
         previous_assistant_text = response_text
         done += 1
 
-        # log – koniec kroku
         print(f"✅  [{idx}/{total}] {task_id} — zapisano: {out_path}")
         print(f"📈 Postęp: {done}/{total} zakończonych\n")
 
@@ -197,6 +177,17 @@ def run_from_yaml(config_path: str = "config.yaml"):
     print(f"🗂️ Historia konwersacji: {conversation_path}")
 
 if __name__ == "__main__":
-    import sys
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
-    run_from_yaml(cfg_path)
+    parser = argparse.ArgumentParser(
+        description="Uruchom zadania z pliku konfiguracyjnego YAML"
+    )
+    parser.add_argument(
+        "-c", "--config",
+        type=str,
+        default="config.yaml",
+        help="Ścieżka do pliku konfiguracyjnego (domyślnie: config.yaml)"
+    )
+    
+    args = parser.parse_args()
+    
+    print(f"🔧 Używam konfiguracji: {args.config}\n")
+    run_from_yaml(args.config)

@@ -1,0 +1,127 @@
+inputs:
+  source_pdf: ./data/owu.pdf
+
+model: gpt-4.1
+temperature: 0.0
+
+output_json_file: conversation_history.json
+result_output_prefix: output/ner_results
+system_prompt_ref: SYSTEM_PROMPT
+
+prompts:
+  SYSTEM_PROMPT: |
+    Jesteś systemem Named Entity Recognition (NER) pracującym na dokumentach Ogólnych Warunków Ubezpieczenia (OWU).
+    
+    Zasady merytoryczne:
+    - Korzystasz WYŁĄCZNIE z treści analizowanego dokumentu.
+    - Nie używasz wiedzy spoza dokumentu.
+    - Uwzględniasz strukturę dokumentu (artykuły, paragrafy, punkty, tabele, załączniki).
+    - Uwzględniasz kontekst wariantów i wartości procentowych świadczeń.
+    - Nie interpretujesz poza literalną treść.
+
+    Zasady techniczne:
+    - Odpowiadasz WYŁĄCZNIE czystym JSON.
+    - Każda encja zawiera pola wymagane w bieżącym zadaniu.
+    - Zachowuj spójność formatowania adresów (Art./§/ust./pkt/lit.).
+    - Nie tworzysz encji bez wystarczających danych i adresu dowodowego.
+
+  __INITIAL_USER_PROMPT__: |
+    Dołączam plik dokumentu "{pdf_basename}".
+    Przeczytaj go i czekaj na wytyczne.
+    Czekaj.
+
+  DISEASE_PROMPT: |
+    Masz w historii pełny tekst dokumentu.
+
+    Zadanie: wyekstrahuj WSZYSTKIE encje klasy DISEASE (choroby, zespoły chorobowe, urazy, zaburzenia) wymienione w dokumencie.
+    Jeśli dokument zawiera kody (np. ICD-10, ICD-9, wewnętrzne klasyfikacje) — dopasuj je do nazw chorób.
+    
+    Dodatkowo:
+    - Dla każdej choroby znajdź wartości procentowe sumy ubezpieczenia (SU) przypisane do wariantów lub planów.
+    - Wartości te mogą występować w tabelach, przypisach lub opisach (np. „Wariant Standard: 20% SU”, „Premium: 50% SU”).
+    - W razie braku danych liczbowych dla wariantu — pomiń go.
+
+    Zasady merytoryczne:
+    - Szukaj nazw chorób i kodów w całym dokumencie (definicje, tabele, załączniki, świadczenia).
+    - Rozpoznawaj synonimy i warianty zapisu tej samej choroby.
+    - Jeśli kod nie jest jednoznaczny, zostaw pole code puste.
+    - W polu benefitPercentPerVariant uwzględnij tylko liczby procentowe (np. 20, 50, 100).
+
+    Zasady techniczne:
+    - Odpowiadasz WYŁĄCZNIE w formacie czystego JSON.
+    - Każda encja musi zawierać komplet pól:
+        name           — unikatowa nazwa w camelCase (EN, ASCII),
+        displayName    — pełna nazwa choroby (PL),
+        code           — kod choroby (np. ICD-10 lub inne oznaczenie z dokumentu),
+        description    — krótki opis/definicja choroby (PL),
+        evidence       — LISTA adresów w dokumencie (np. ["§12 ust. 3", "Załącznik 2, tabela 1"]),
+        applicableVariants — LISTA wariantów ubezpieczenia, jeśli wskazane,
+        benefitPercentPerVariant — OBIEKT (klucz: wariant, wartość: liczba procentowa, np. {"Standard": 20, "Premium": 50}).
+    - Jeśli nie znajdziesz kodu — podaj tylko nazwę i opis.
+    - Jeśli brak adresu — pomiń encję.
+
+    Output:
+    - TABLICA obiektów JSON zgodnych ze schematem powyżej.
+
+  DISEASE_FIND_MISSING_PROMPT: |
+    Masz w historii pełny tekst dokumentu OWU oraz listę wcześniej wykrytych encji DISEASE.
+    Zadanie: wyekstrahuj encje DISEASE, które nie zostały wcześniej wykryte — również takie, które mają inne wartości procentowe świadczeń w poszczególnych wariantach.
+
+    Metody:
+      1) Przeskanuj sekcje zawierające tabele z procentami SU.
+      2) Szukaj wzorców „% SU”, „proc. sumy ubezpieczenia”, „procent sumy”.
+      3) Porównaj z już istniejącymi encjami — nie powielaj identycznych.
+      4) Uzupełnij pola benefitPercentPerVariant, jeśli brakowały.
+
+    Output: czysty JSON — tablica NOWYCH lub UZUPEŁNIONYCH obiektów (name, displayName, code, description, evidence, applicableVariants, benefitPercentPerVariant).
+    Jeżeli brak nowych → zwróć [].
+   
+  MEDA_DATA: |
+    Zadanie: odczytaj i potwierdź, że dokument został wczytany.
+    Na podstawie pierwszych stron, nagłówków i metadanych dokumentu, wygeneruj strukturę opisową zawierającą podstawowe informacje o OWU.
+    
+    Wygeneruj wynik w formacie JSON o strukturze:
+
+    {
+      "status": "dokument odczytany",
+      "nazwa_pliku": "<nazwa_pliku>",
+      "wersja_OWU": "<oznaczenie_wersji>",
+      "data_wydania": "<data publikacji lub obowiązywania>",
+      "jezyk_dokumentu": "<pl/en/...>",
+      "liczba_stron": <liczba całkowita jeśli znana>,
+      "nazwa_ubezpieczyciela": "<nazwa firmy>",
+      "opis_ogolny": "<krótki opis celu i zakresu OWU>",
+      "sekcje_glowne": ["<sekcja 1>", "<sekcja 2>", "..."],
+      "warianty_znalezione": ["<wariant1>", "<wariant2>", "..."],
+      "typ_dokumentu": "<OWU / Załącznik / Tabela świadczeń>",
+      "hasla_kluczowe": ["<fraza1>", "<fraza2>", "..."],
+      "zrodlo_strukturalne": "<np. OCR / PDF parser / oryginał>",
+      "data_analizy": "<timestamp ISO 8601>"
+    }
+
+    Zasady:
+    - Jeśli jakaś informacja nie występuje w dokumencie, wpisz wartość pustą ("") lub pustą tablicę [].
+    - Nie dodawaj żadnych komentarzy ani tekstu poza powyższą strukturą JSON.
+    - status zawsze musi wynosić "dokument odczytany".
+tasks:
+  - id: Wprowadzenie dokumentu do kontekstu
+    role: user
+    prompt_ref: __INITIAL_USER_PROMPT__
+    render:
+      pdf_basename: "{inputs.source_pdf|basename}"
+    save_as: 0.init.json
+
+  - id: Ekstrakcja encji typu DISEASE
+    role: user
+    prompt_ref: DISEASE_PROMPT
+    save_as: 1.ekstrakcja.json
+
+  - id: Ekstrakcja brakujących encji DISEASE
+    role: user
+    prompt_ref: DISEASE_FIND_MISSING_PROMPT
+    save_as: 2.ekstrakcja.json
+
+  - id: Ekstrakcja meta danych
+    role: user
+    prompt_ref: MEDA_DATA
+    save_as: 3.meta.json
