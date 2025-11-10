@@ -17,7 +17,7 @@ Windows (PowerShell):
 
 ```powershell
 py -m venv .venv
-.venv\\Scripts\\Activate
+source .venv/Scripts/activate
 python -m pip install -U pip
 pip install python-dotenv pyyaml requests openai anthropic
 ```
@@ -151,4 +151,3 @@ Uruchom:
 ```bash
 python run_tasks.py -c config.yaml
 ```
-

@@ -1,0 +1,75 @@
+inputs:
+  source_pdf: ./data/owu.pdf
+
+model: gpt-4.1
+temperature: 0.0
+
+output_json_file: conversation_history.json
+result_output_prefix: output/ner_results
+system_prompt_ref: SYSTEM_PROMPT
+
+prompts:
+  SYSTEM_PROMPT: |
+    Jesteś systemem zamieniającym treść dokumentów na idealnej jakości markdown
+    
+    Zasady merytoryczne:
+    - Korzystasz WYŁĄCZNIE z treści analizowanego dokumentu.
+    - Nie używasz wiedzy spoza dokumentu.
+    - Uwzględniasz strukturę dokumentu (artykuły, paragrafy, punkty, tabele, załączniki).
+    - Uwzględniasz kontekst wariantów i wartości procentowych świadczeń.
+    - Nie interpretujesz nie podsumowujesz
+
+    Zasady techniczne:
+     - Odpowiadasz WYŁĄCZNIE czystym JSON.
+
+  __INITIAL_USER_PROMPT__: |
+    Dołączam plik dokumentu "{pdf_basename}".
+    Przeczytaj go i czekaj na wytyczne.
+    Czekaj.
+
+
+  DISEASE_MARKDOWN_TABLE_PROMPT: |
+    Masz w historii pełny tekst dokumentu 
+    Znajdziesz w dokumencie sekcję z tabelą i wyekstraktujesz CAŁĄ tabelkę w formacie  markdown
+    Tabela może być bardzo obszerna i zawierać ponad 100 pozycji szczegółowych.
+    W przypadku dużej tabeli zawsze uznawaj że TAK - WARTO EKSTRAKTOWAĆ 
+
+    Wygeneruj wynik w formacie JSON o strukturze:
+
+    {
+      "table_markdown": "wyekstraktowany markdown",
+    }
+
+    Output:
+    - Obiekt JSON zgodnych ze schematem powyżej.
+    - MARKDOWN - czysty pięknie sformatowany tabelaryczny MARKDOWN
+  
+  DISEASE_LABELED_TABLE_PROMPT: |
+    Masz w historii pełny tekst dokumentu oraz markdown z tabelą desese.
+    Transpiluj tabelę z markdown na Labeled Text
+    
+    {
+      "table_labeled_text": "[Labeled Text] przetranspilowany z markdown",
+    }
+
+     Output:
+    - Obiekt JSON zgodnych ze schematem powyżej.
+    - Labeled Text - czysty pięknie sformatowany tabelaryczny MARKDOWN
+  
+tasks:
+  - id: Wprowadzenie dokumentu do kontekstu
+    role: user
+    prompt_ref: __INITIAL_USER_PROMPT__
+    render:
+      pdf_basename: "{inputs.source_pdf|basename}"
+    save_as: 0.init.json
+
+  - id: Ekstrakcja markdown
+    role: user
+    prompt_ref: DISEASE_MARKDOWN_TABLE_PROMPT
+    save_as: 2.disease_markdown_table_prompt.json
+
+  - id: Transpilacja na Labeled plain text
+    role: user
+    prompt_ref: DISEASE_LABELED_TABLE_PROMPT
+    save_as: 3.meta.json

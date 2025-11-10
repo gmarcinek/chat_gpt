@@ -53,22 +53,19 @@ models:
     max_output: 16384
     vision: true
 
-  # === Anthropic Claude family ===
-  claude-opus-4.1:
+  # === Anthropic Claude 4 family ===
+  claude-sonnet-4.5:
     provider: anthropic
     input_context: 200000
-    max_output: 32000
-    vision: true
-  claude-opus-4:
-    provider: anthropic
-    input_context: 200000
-    max_output: 32000
+    max_output: 64000
     vision: true
   claude-sonnet-4:
     provider: anthropic
     input_context: 200000
     max_output: 64000
     vision: true
+
+  # === Anthropic Claude 3.x family ===
   claude-3.7-sonnet:
     provider: anthropic
     input_context: 200000
